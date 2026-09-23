@@ -1,0 +1,1 @@
+import{n as e}from"./vendor-element-ui-84d4e8d3.js";import"./vendor-e5ac1d0d.js";const _={};var t=function(){var n=this,r=n._self._c;return r("div",[n._v("实名认证")])},l=[],o=e(_,t,l,!1,null,null,null,null);const f=o.exports;export{f as default};

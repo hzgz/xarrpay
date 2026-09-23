@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+runtime/
+storage/
+logs/
+vendor/
+/var/
+/reverse-work/
+*.log
+*.pid
+*.sqlite
+__pycache__/
+*.pyc

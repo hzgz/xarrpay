@@ -1,0 +1,1 @@
+const a=[{label:"全部",value:0},{label:"待支付",value:1,tag:"info"},{label:"支付成功",value:2,tag:"success"},{label:"支付关闭",value:3,tag:"danger"},{label:"支付超时",value:4,tag:"warning"},{label:"创建失败",value:5,tag:"danger"}];export{a as o};

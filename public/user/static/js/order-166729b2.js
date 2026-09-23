@@ -1,0 +1,1 @@
+function i(){const t=new Date,n=t.getFullYear().toString(),o=(t.getMonth()+1).toString().padStart(2,"0"),e=t.getDate().toString().padStart(2,"0"),r=t.getHours().toString().padStart(2,"0"),s=t.getMinutes().toString().padStart(2,"0"),a=t.getSeconds().toString().padStart(2,"0"),g=t.getMilliseconds().toString().padStart(3,"0");return`${n}${o}${e}${r}${s}${a}${g}`}export{i as g};

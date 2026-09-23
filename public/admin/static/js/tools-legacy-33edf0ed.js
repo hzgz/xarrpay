@@ -1,0 +1,1 @@
+System.register(["./index-legacy-340a9073.js"],function(e,t){"use strict";var n;return{setters:[function(e){n=e.r}],execute:function(){e("t",{emailMass:function(e){return n.post("/tools/email-mass",e)},orderClean:function(e){return n.post("/tools/order-clean",e)},configWizardCheck:function(){return n.get("/tools/config-wizard/check")}})}}});

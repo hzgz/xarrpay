@@ -1,0 +1,1 @@
+.animate-loading-progress[data-v-ff6eb6f6]{background:linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,.5) 50%,rgba(255,255,255,0) 100%);animation:loading-ff6eb6f6 2s infinite linear}@keyframes loading-ff6eb6f6{0%{transform:translate(-100%)}to{transform:translate(100%)}}

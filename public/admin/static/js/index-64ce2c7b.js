@@ -1,0 +1,1 @@
+import{n as _}from"./vendor-element-ui-84d4e8d3.js";import"./vendor-e5ac1d0d.js";const r={};var t=function(){var n=this,e=n._self._c;return e("router-view")},o=[],s=_(r,t,o,!1,null,null,null,null);const i=s.exports;export{i as default};

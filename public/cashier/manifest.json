@@ -1,0 +1,10 @@
+{
+  "name": "default",
+  "title": "收银台默认模板",
+  "author": "官方",
+  "description": "收银台默认模板",
+  "link": "",
+  "version": "1.5.0.8",
+  "min_program_version": "1.5.0.8",
+  "type": 5
+}

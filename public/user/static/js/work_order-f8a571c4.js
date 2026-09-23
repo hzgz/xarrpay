@@ -1,0 +1,1 @@
+import{t as e,v as t}from"./index-d18e679b.js";function o(r){return e("/work-order/list",r)}function n(r){return e("/work-order/cate",r)}function u(r){return e("/work-order/reply",r)}function c(r){return t("/work-order/create",r)}function i(r){return t("/work-order/reply",r)}const a={list:o,create:c,cate:n,getReply:u,submitReply:i};export{a as w};

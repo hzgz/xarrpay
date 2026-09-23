@@ -1,0 +1,1 @@
+import{r as t}from"./index-199d4f7f.js";function r(o){return t.post("/tools/email-mass",o)}function e(o){return t.post("/tools/order-clean",o)}function n(){return t.get("/tools/config-wizard/check")}const a={emailMass:r,orderClean:e,configWizardCheck:n};export{a as t};
