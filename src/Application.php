@@ -59,6 +59,17 @@ final class Application
         $router->get('/api/admin/order/list', fn (Request $request) => $admin->orders($request));
         $router->get('/api/admin/statistics/info', fn (Request $request) => $admin->statistics($request));
         $router->get('/api/admin/plugins/list', fn (Request $request) => $admin->plugins($request));
+        $router->get('/api/admin/pay/conf', fn (Request $request) => $admin->payConf($request));
+        $router->get('/api/admin/home/info', fn (Request $request) => $admin->homeInfo($request));
+        $router->get('/api/admin/home/pay-distribution', fn (Request $request) => $admin->homePayDistribution($request));
+        $router->get('/api/admin/home/merchant-register', fn (Request $request) => $admin->homeMerchantRegister($request));
+        $router->get('/api/admin/home/order-amount', fn (Request $request) => $admin->homeOrderAmount($request));
+        $router->get('/api/admin/home/daily-recharge', fn (Request $request) => $admin->homeDailyRecharge($request));
+        $router->get('/api/admin/home/merchant-ranking', fn (Request $request) => $admin->homeMerchantRanking($request));
+        $router->get('/api/admin/home/authorize', fn (Request $request) => $admin->homeAuthorize($request));
+        $router->get('/api/admin/home/safe-rate', fn (Request $request) => $admin->homeSafeRate($request));
+        $router->get('/api/admin/system/info', fn (Request $request) => $admin->systemInfo($request));
+        $router->get('/api/admin/system/redis/status', fn (Request $request) => $admin->redisStatus($request));
         foreach (['/api', '/api/admin'] as $prefix) {
             $router->post($prefix . '/pay-type/create', fn (Request $request) => $admin->createPayType($request));
             $router->post($prefix . '/pay-type/edit', fn (Request $request) => $admin->editPayType($request));

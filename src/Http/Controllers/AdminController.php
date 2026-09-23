@@ -552,6 +552,210 @@ final class AdminController
         Response::success(['list' => $items, 'count' => count($items)]);
     }
 
+    public function payConf(Request $request): never
+    {
+        $this->authenticatedStaff($request);
+        $payTypes = array_map(static function (array $row): array {
+            $value = (string) ($row['value'] ?? $row['code'] ?? $row['id'] ?? '');
+            return [
+                'id' => (int) ($row['id'] ?? 0),
+                'value' => $value,
+                'code' => (string) ($row['code'] ?? $value),
+                'name' => (string) ($row['name'] ?? $row['label'] ?? $value),
+                'label' => (string) ($row['label'] ?? $row['name'] ?? $value),
+                'logo' => (string) ($row['logo'] ?? ''),
+                'status' => (int) ($row['status'] ?? 0),
+            ];
+        }, $this->tableRows('pay_type'));
+        $channels = array_map(static function (array $row): array {
+            $code = (string) ($row['code'] ?? '');
+            return [
+                'id' => (int) ($row['id'] ?? 0),
+                'code' => $code,
+                'name' => (string) ($row['name'] ?? $code),
+                'type' => (string) ($row['type'] ?? ''),
+                'status' => (int) ($row['status'] ?? 0),
+                'plugin_name' => (string) ($row['plugin_name'] ?? ''),
+                'remark' => (string) ($row['remark'] ?? ''),
+            ];
+        }, $this->tableRows('pay_channel'));
+
+        Response::success(['pay_type' => $payTypes, 'channels' => $channels]);
+    }
+
+    public function homeInfo(Request $request): never
+    {
+        $this->authenticatedStaff($request);
+        $db = Database::connection();
+        $todayStart = (int) strtotime('today');
+        $orderCount = (int) $db->query('SELECT COUNT(*) FROM `order`')->fetchColumn();
+        $successCount = (int) $db->query('SELECT COUNT(*) FROM `order` WHERE status = 2')->fetchColumn();
+        $successAmount = (int) ($db->query('SELECT COALESCE(SUM(trade_amount), 0) FROM `order` WHERE status = 2')->fetchColumn() ?: 0);
+        $merchantCount = (int) $db->query('SELECT COUNT(*) FROM `user`')->fetchColumn();
+        $todayOrderQuery = $db->prepare('SELECT COUNT(*) FROM `order` WHERE created_at >= :start');
+        $todayOrderQuery->execute([':start' => $todayStart]);
+        $todaySuccessQuery = $db->prepare('SELECT COUNT(*) FROM `order` WHERE status = 2 AND created_at >= :start');
+        $todaySuccessQuery->execute([':start' => $todayStart]);
+        $todayAmountQuery = $db->prepare('SELECT COALESCE(SUM(trade_amount), 0) FROM `order` WHERE status = 2 AND created_at >= :start');
+        $todayAmountQuery->execute([':start' => $todayStart]);
+        $todayOrderCount = (int) $todayOrderQuery->fetchColumn();
+        $todaySuccessCount = (int) $todaySuccessQuery->fetchColumn();
+        $todaySuccessAmount = (int) ($todayAmountQuery->fetchColumn() ?: 0);
+
+        Response::success([
+            'overview' => [
+                ['title' => '订单总数', 'value' => $orderCount, 'icon' => 'el-icon-s-order'],
+                ['title' => '成功订单', 'value' => $successCount, 'icon' => 'el-icon-circle-check'],
+                ['title' => '成交金额', 'value' => $this->moneyText($successAmount), 'icon' => 'el-icon-money'],
+                ['title' => '商户数量', 'value' => $merchantCount, 'icon' => 'el-icon-user'],
+                ['title' => '今日订单', 'value' => $todayOrderCount, 'icon' => 'el-icon-date'],
+                ['title' => '今日成功', 'value' => $todaySuccessCount, 'icon' => 'el-icon-success'],
+                ['title' => '今日成交', 'value' => $this->moneyText($todaySuccessAmount), 'icon' => 'el-icon-data-line'],
+                ['title' => '支付方式', 'value' => count($this->tableRows('pay_type')), 'icon' => 'el-icon-bank-card'],
+            ],
+            'statis' => [
+                'order_count' => $orderCount,
+                'order_success_count' => $successCount,
+                'order_success_amount' => $successAmount,
+                'merchant_count' => $merchantCount,
+                'today_order_count' => $todayOrderCount,
+                'today_success_count' => $todaySuccessCount,
+                'today_success_amount' => $todaySuccessAmount,
+            ],
+        ]);
+    }
+
+    public function homePayDistribution(Request $request): never
+    {
+        $this->authenticatedStaff($request);
+        $labels = [];
+        foreach ($this->tableRows('pay_type') as $row) {
+            $value = (string) ($row['value'] ?? $row['code'] ?? '');
+            if ($value !== '') {
+                $labels[$value] = (string) ($row['label'] ?? $row['name'] ?? $value);
+            }
+        }
+        $items = [];
+        foreach ($this->tableRows('order') as $order) {
+            $payType = (string) ($order['pay_type'] ?? '');
+            $key = $payType !== '' ? $payType : 'unknown';
+            $items[$key] ??= ['title' => $labels[$payType] ?? ($payType !== '' ? $payType : '未选择'), 'value' => 0, 'amount' => 0];
+            $items[$key]['value']++;
+            if ((int) ($order['status'] ?? 0) === 2) {
+                $items[$key]['amount'] += (int) ($order['trade_amount'] ?? 0);
+            }
+        }
+        if ($items === []) {
+            foreach ($labels as $value => $label) {
+                $items[$value] = ['title' => $label, 'value' => 0, 'amount' => 0];
+            }
+        }
+        Response::success(['items' => array_values($items)]);
+    }
+
+    public function homeMerchantRegister(Request $request): never
+    {
+        $this->authenticatedStaff($request);
+        $category = $this->lastDays(7);
+        $merchantCount = (int) Database::connection()->query('SELECT COUNT(*) FROM `user`')->fetchColumn();
+        Response::success([
+            'category' => $category,
+            'items' => [[
+                'name' => '商户总数',
+                'type' => 'line',
+                'smooth' => true,
+                'data' => array_fill(0, count($category), $merchantCount),
+            ]],
+        ]);
+    }
+
+    public function homeOrderAmount(Request $request): never
+    {
+        $this->authenticatedStaff($request);
+        [$category, $rows] = $this->dailyOrderBuckets(7);
+        Response::success([
+            'category' => $category,
+            'items' => [
+                ['name' => '订单数量', 'type' => 'line', 'smooth' => true, 'data' => array_column($rows, 'count')],
+                ['name' => '成交金额', 'type' => 'line', 'smooth' => true, 'data' => array_map(static fn (array $row): float => round($row['amount'] / 100, 2), $rows)],
+            ],
+        ]);
+    }
+
+    public function homeDailyRecharge(Request $request): never
+    {
+        $this->authenticatedStaff($request);
+        $category = $this->lastDays(7);
+        Response::success([
+            'category' => $category,
+            'items' => [[
+                'name' => '充值金额',
+                'type' => 'line',
+                'smooth' => true,
+                'data' => array_fill(0, count($category), 0),
+            ]],
+        ]);
+    }
+
+    public function homeMerchantRanking(Request $request): never
+    {
+        $this->authenticatedStaff($request);
+        $query = Database::connection()->query('SELECT u.id, u.merchant_name, u.username, COUNT(o.id) AS order_count, COALESCE(SUM(o.trade_amount), 0) AS trade_amount FROM `user` u LEFT JOIN `order` o ON o.uid = u.id AND o.status = 2 GROUP BY u.id, u.merchant_name, u.username ORDER BY trade_amount DESC, order_count DESC, u.id ASC LIMIT 10');
+        $items = [];
+        foreach ($query->fetchAll() as $index => $row) {
+            $items[] = [
+                'rank' => $index + 1,
+                'uid' => (int) ($row['id'] ?? 0),
+                'merchant_name' => (string) ($row['merchant_name'] ?? $row['username'] ?? ''),
+                'order_count' => (int) ($row['order_count'] ?? 0),
+                'trade_amount' => $this->moneyText((int) ($row['trade_amount'] ?? 0)),
+            ];
+        }
+        Response::success($items);
+    }
+
+    public function homeAuthorize(Request $request): never
+    {
+        $this->authenticatedStaff($request);
+        $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
+        Response::success([
+            'domain' => preg_replace('/:\d+$/', '', $host),
+            'type' => '本地重构版',
+            'reg_time' => strtotime('2026-09-22 00:00:00'),
+            'expire_time' => 4102444800,
+            'open_id' => substr(hash('sha256', $host . '|xarrpay-local'), 0, 24),
+        ]);
+    }
+
+    public function homeSafeRate(Request $request): never
+    {
+        $this->authenticatedStaff($request);
+        Response::success(['score' => 100, 'reasons' => []]);
+    }
+
+    public function systemInfo(Request $request): never
+    {
+        $this->authenticatedStaff($request);
+        Response::success([
+            'version' => '1.5.1.12-php-local',
+            'version_code' => 'php-refactor-20260922',
+            'version_btime' => '2026-09-22 00:00:00',
+            'php_version' => PHP_VERSION,
+            'os' => PHP_OS_FAMILY,
+            'server' => $_SERVER['SERVER_SOFTWARE'] ?? 'PHP built-in server',
+        ]);
+    }
+
+    public function redisStatus(Request $request): never
+    {
+        $this->authenticatedStaff($request);
+        Response::success([
+            'configured' => false,
+            'connected' => false,
+            'message' => 'PHP 重构本地版当前未配置 Redis',
+        ]);
+    }
+
     public function compliance(Request $request): never
     {
         $this->authenticatedStaff($request);
@@ -581,6 +785,53 @@ final class AdminController
 
         $this->saveOption('compliance_confirmed_content', $content);
         Response::success(null, '规则确认成功。');
+    }
+
+    private function moneyText(int $cents): string
+    {
+        return number_format($cents / 100, 2, '.', '');
+    }
+
+    /** @return list<string> */
+    private function lastDays(int $days): array
+    {
+        $days = max($days, 1);
+        $start = strtotime('today') - (($days - 1) * 86400);
+        $items = [];
+        for ($index = 0; $index < $days; $index++) {
+            $items[] = date('m-d', $start + ($index * 86400));
+        }
+        return $items;
+    }
+
+    /** @return array{0: list<string>, 1: list<array{date: string, count: int, amount: int}>} */
+    private function dailyOrderBuckets(int $days): array
+    {
+        $days = max($days, 1);
+        $category = $this->lastDays($days);
+        $start = strtotime('today') - (($days - 1) * 86400);
+        $buckets = [];
+        foreach ($category as $date) {
+            $buckets[$date] = ['date' => $date, 'count' => 0, 'amount' => 0];
+        }
+
+        $query = Database::connection()->prepare('SELECT created_at, trade_amount, status FROM `order` WHERE created_at >= :start ORDER BY created_at ASC');
+        $query->execute([':start' => $start]);
+        foreach ($query->fetchAll() as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $date = date('m-d', (int) ($row['created_at'] ?? 0));
+            if (!isset($buckets[$date])) {
+                continue;
+            }
+            $buckets[$date]['count']++;
+            if ((int) ($row['status'] ?? 0) === 2) {
+                $buckets[$date]['amount'] += (int) ($row['trade_amount'] ?? 0);
+            }
+        }
+
+        return [$category, array_values($buckets)];
     }
 
     /** @return list<array<string, mixed>> */

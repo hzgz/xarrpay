@@ -214,6 +214,22 @@ try {
         $response = requestJsonWithHeaders($base, $path, 'GET', [], $cookieFile, $auth);
         expectCode($response, 200, $path);
     }
+    foreach ([
+        '/api/admin/pay/conf',
+        '/api/admin/home/info',
+        '/api/admin/home/pay-distribution',
+        '/api/admin/home/merchant-register',
+        '/api/admin/home/order-amount',
+        '/api/admin/home/daily-recharge',
+        '/api/admin/home/merchant-ranking',
+        '/api/admin/home/authorize',
+        '/api/admin/home/safe-rate',
+        '/api/admin/system/info',
+        '/api/admin/system/redis/status',
+    ] as $path) {
+        $response = requestJsonWithHeaders($base, $path, 'GET', [], $cookieFile, $auth);
+        expectCode($response, 200, $path);
+    }
 
     $suffix = date('YmdHis') . random_int(100, 999);
     $payType = requestJsonWithHeaders($base, '/api/admin/pay-type/create', 'POST', [
