@@ -1,0 +1,17 @@
+{
+  "id": "static_code",
+  "name": "static_code",
+  "type": "pay",
+  "title": "静态收款码",
+  "description": "使用收款账号中已配置的支付宝或微信静态收款码。",
+  "version": "1.0.0",
+  "capabilities": ["create", "query", "qrcode"],
+  "pay_types": ["alipay", "wxpay"],
+  "plugin_options": {"use_pay_codes": 1},
+  "channels": {},
+  "form_entry": "form.php",
+  "account_entry": "account.php",
+  "enabled": true,
+  "running": true,
+  "adapter_entry": "adapter.php"
+}

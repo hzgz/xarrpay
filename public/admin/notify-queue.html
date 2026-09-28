@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>通知队列</title><script src="/site-branding.js?v=20260927"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f3f5f9;
+      --surface: #fff;
+      --line: #e5e9f2;
+      --text: #252a34;
+      --muted: #7a8495;
+      --primary: #1677ff;
+      --danger: #d4380d;
+      --warning: #ad6800;
+      --success: #389e0d;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--page);
+      color: var(--text);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+
+    .topbar {
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand { font-size: 18px; font-weight: 700; }
+    .topbar a {
+      color: var(--primary);
+      text-decoration: none;
+      font-size: 13px;
+    }
+
+    .page {
+      width: min(1440px, calc(100% - 40px));
+      margin: 24px auto;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(22, 34, 51, .04);
+    }
+
+    .heading {
+      padding: 20px 24px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 { margin: 0 0 4px; font-size: 20px; }
+    .hint { margin: 0; color: var(--muted); }
+
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: end;
+      padding: 16px 24px;
+    }
+
+    .field {
+      display: flex;
+      min-width: 160px;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .field.search { min-width: min(320px, 100%); flex: 1; }
+    label { color: #5d6675; font-size: 12px; }
+    input, select, button {
+      min-height: 36px;
+      border: 1px solid #cfd6e4;
+      border-radius: 4px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+      padding: 7px 10px;
+    }
+
+    input:focus, select:focus, button:focus-visible {
+      border-color: var(--primary);
+      outline: 2px solid rgba(22, 119, 255, .18);
+      outline-offset: 1px;
+    }
+
+    button {
+      cursor: pointer;
+      padding: 7px 16px;
+    }
+
+    button.primary {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: #fff;
+    }
+
+    button.secondary { color: #4d5665; }
+    button:disabled { cursor: not-allowed; opacity: .55; }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(120px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+
+    .metric { padding: 14px 16px; }
+    .metric strong { display: block; font-size: 22px; line-height: 1.2; }
+    .metric span { color: var(--muted); font-size: 12px; }
+
+    .table-panel { overflow: hidden; }
+    .table-scroll { overflow-x: auto; }
+    table { width: 100%; min-width: 1050px; border-collapse: collapse; }
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      white-space: nowrap;
+    }
+    th { background: #fafbfc; color: #5d6675; font-size: 12px; font-weight: 600; }
+    td.detail { max-width: 280px; white-space: normal; word-break: break-word; }
+    td.muted { color: var(--muted); }
+    tr:last-child td { border-bottom: 0; }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .status::before { width: 6px; height: 6px; border-radius: 50%; background: currentColor; content: ""; }
+    .status.queued { color: var(--primary); background: #e6f4ff; }
+    .status.processing { color: var(--warning); background: #fff7e6; }
+    .status.success { color: var(--success); background: #f6ffed; }
+    .status.failed, .status.skipped { color: var(--danger); background: #fff2e8; }
+
+    .row-action {
+      min-height: 30px;
+      padding: 4px 10px;
+      color: var(--danger);
+      border-color: #ffbb96;
+      background: #fff;
+      font-size: 12px;
+    }
+
+    .empty, .loading, .error {
+      padding: 48px 20px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .error { color: var(--danger); }
+
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+    }
+
+    .pager { display: flex; align-items: center; gap: 8px; }
+    .pager button { min-width: 32px; padding: 5px 9px; }
+
+    @media (max-width: 720px) {
+      .topbar { padding: 0 16px; }
+      .page { width: calc(100% - 24px); margin: 12px auto; }
+      .heading, .filters { padding-left: 16px; padding-right: 16px; }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .filters .field, .filters button { width: 100%; }
+      .footer { align-items: flex-start; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span data-site-name></span> · 通知队列</div>
+    <a href="/admin">返回后台</a>
+  </header>
+
+  <main class="page">
+    <section class="panel">
+      <div class="heading">
+        <h1>异步通知队列</h1>
+        <p class="hint">查看支付通知投递状态；失败或跳过的任务可以重新入队。</p>
+      </div>
+      <form class="filters" id="filters">
+        <div class="field search">
+          <label for="query">搜索</label>
+          <input id="query" name="query" placeholder="订单号、通知地址或错误信息" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="status">状态</label>
+          <select id="status" name="status">
+            <option value="">全部状态</option>
+            <option value="queued">排队中</option>
+            <option value="processing">处理中</option>
+            <option value="success">成功</option>
+            <option value="failed">失败</option>
+            <option value="skipped">已跳过</option>
+          </select>
+        </div>
+        <button class="primary" type="submit">搜索</button>
+        <button class="secondary" id="reset" type="button">重置</button>
+      </form>
+    </section>
+
+    <section class="summary" aria-label="队列概览">
+      <div class="panel metric"><strong id="total">-</strong><span>当前结果</span></div>
+      <div class="panel metric"><strong id="queued">-</strong><span>排队中</span></div>
+      <div class="panel metric"><strong id="processing">-</strong><span>处理中</span></div>
+      <div class="panel metric"><strong id="failed">-</strong><span>失败/跳过</span></div>
+    </section>
+
+    <section class="panel table-panel">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>订单号</th>
+              <th>商户</th>
+              <th>状态</th>
+              <th>尝试次数</th>
+              <th>HTTP</th>
+              <th>通知地址</th>
+              <th>错误信息</th>
+              <th>更新时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="rows">
+            <tr><td class="loading" colspan="10">正在加载</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="footer">
+        <span id="range">-</span>
+        <div class="pager">
+          <button id="prev" type="button" aria-label="上一页">上一页</button>
+          <span id="page">1 / 1</span>
+          <button id="next" type="button" aria-label="下一页">下一页</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var state = { page: 1, limit: 20, total: 0, rows: [] };
+      var labels = {
+        queued: "排队中",
+        processing: "处理中",
+        success: "成功",
+        failed: "失败",
+        skipped: "已跳过"
+      };
+
+      function token() {
+        return window.localStorage.getItem("token-admin") || "";
+      }
+
+      function escapeText(value) {
+        return String(value == null ? "" : value);
+      }
+
+      function formatTime(value) {
+        var timestamp = Number(value || 0) * 1000;
+        if (!timestamp) return "-";
+        return new Date(timestamp).toLocaleString("zh-CN", { hour12: false });
+      }
+
+      function request(url, options) {
+        options = options || {};
+        options.headers = Object.assign({
+          "Authorization": token(),
+          "Content-Type": "application/json"
+        }, options.headers || {});
+        return fetch(url, options).then(function (response) {
+          return response.json().then(function (body) {
+            if (body.code === 401 || body.code === 404) {
+              window.location.href = "/admin/login";
+              throw new Error("登录已失效");
+            }
+            if (!response.ok || body.code !== 200) {
+              throw new Error(body.message || "请求失败");
+            }
+            return body;
+          });
+        });
+      }
+
+      function setRows(rows) {
+        var target = document.getElementById("rows");
+        if (!rows.length) {
+          target.innerHTML = '<tr><td class="empty" colspan="10">暂无通知任务</td></tr>';
+          return;
+        }
+        target.innerHTML = rows.map(function (row) {
+          var status = escapeText(row.status || "queued");
+          var retry = (status === "failed" || status === "skipped")
+            ? '<button class="row-action" type="button" data-retry="' + escapeText(row.id) + '">重新入队</button>'
+            : '<span class="muted">-</span>';
+          return "<tr>" +
+            "<td>" + escapeText(row.id) + "</td>" +
+            "<td><strong>" + escapeText(row.order_id) + "</strong></td>" +
+            "<td>" + escapeText(row.merchant_name || row.username || row.uid || "-") + "</td>" +
+            '<td><span class="status ' + status + '">' + escapeText(labels[status] || status) + "</span></td>" +
+            "<td>" + escapeText(row.attempts) + " / " + escapeText(row.max_attempts) + "</td>" +
+            "<td>" + escapeText(row.last_http_status || "-") + "</td>" +
+            '<td class="detail">' + escapeText(row.url || "-") + "</td>" +
+            '<td class="detail">' + escapeText(row.last_error || "-") + "</td>" +
+            "<td>" + formatTime(row.updated_at) + "</td>" +
+            "<td>" + retry + "</td>" +
+            "</tr>";
+        }).join("");
+      }
+
+      function setLoading(message, className) {
+        document.getElementById("rows").innerHTML =
+          '<tr><td class="' + (className || "loading") + '" colspan="10">' + escapeText(message) + "</td></tr>";
+      }
+
+      function load() {
+        setLoading("正在加载");
+        var params = new URLSearchParams({
+          page: String(state.page),
+          limit: String(state.limit)
+        });
+        var query = document.getElementById("query").value.trim();
+        var status = document.getElementById("status").value;
+        if (query) params.set("query", query);
+        if (status) params.set("status", status);
+
+        return request("/api/admin/notify/queue?" + params.toString()).then(function (body) {
+          var data = body.data || {};
+          state.rows = Array.isArray(data.list) ? data.list : [];
+          state.total = Number(data.total || data.count || 0);
+          setRows(state.rows);
+          document.getElementById("total").textContent = state.total;
+          document.getElementById("queued").textContent = state.rows.filter(function (row) { return row.status === "queued"; }).length;
+          document.getElementById("processing").textContent = state.rows.filter(function (row) { return row.status === "processing"; }).length;
+          document.getElementById("failed").textContent = state.rows.filter(function (row) { return row.status === "failed" || row.status === "skipped"; }).length;
+          var pages = Math.max(1, Math.ceil(state.total / state.limit));
+          document.getElementById("page").textContent = state.page + " / " + pages;
+          document.getElementById("range").textContent = state.total ? ((state.page - 1) * state.limit + 1) + " - " + Math.min(state.page * state.limit, state.total) + " / " + state.total : "0 条";
+          document.getElementById("prev").disabled = state.page <= 1;
+          document.getElementById("next").disabled = state.page >= pages;
+        }).catch(function (error) {
+          setLoading(error.message || "加载失败", "error");
+        });
+      }
+
+      document.getElementById("filters").addEventListener("submit", function (event) {
+        event.preventDefault();
+        state.page = 1;
+        load();
+      });
+      document.getElementById("reset").addEventListener("click", function () {
+        document.getElementById("query").value = "";
+        document.getElementById("status").value = "";
+        state.page = 1;
+        load();
+      });
+      document.getElementById("prev").addEventListener("click", function () {
+        if (state.page > 1) { state.page -= 1; load(); }
+      });
+      document.getElementById("next").addEventListener("click", function () {
+        if (state.page < Math.ceil(state.total / state.limit)) { state.page += 1; load(); }
+      });
+      document.getElementById("rows").addEventListener("click", function (event) {
+        var button = event.target.closest("[data-retry]");
+        if (!button) return;
+        var id = Number(button.getAttribute("data-retry"));
+        if (!id || !window.confirm("确认将该通知任务重新入队吗？")) return;
+        button.disabled = true;
+        request("/api/admin/notify/queue/retry", {
+          method: "POST",
+          body: JSON.stringify({ id: id })
+        }).then(function () {
+          window.alert("通知任务已重新入队");
+          load();
+        }).catch(function (error) {
+          button.disabled = false;
+          window.alert(error.message || "重试失败");
+        });
+      });
+
+      load();
+    })();
+  </script>
+</body>
+</html>

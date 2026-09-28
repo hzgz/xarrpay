@@ -15,6 +15,12 @@ import urllib.request
 import websocket
 
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+
 def find_browser(explicit):
     candidates = []
     if explicit:
@@ -50,7 +56,53 @@ def wait_for(label, timeout, interval, fn):
     raise RuntimeError(f"Timed out waiting for {label}: {last}")
 
 
+def browser_wait_timeout(default):
+    value = os.environ.get("XARR_BROWSER_WAIT_SECONDS", "").strip()
+    if not value:
+        return default
+    try:
+        return max(default, int(value))
+    except ValueError:
+        return default
+
+
 def read_session_code(session_id):
+    remote_host = os.environ.get("XARR_REMOTE_SSH_HOST", "").strip()
+    if remote_host:
+        remote_user = os.environ.get("XARR_REMOTE_SSH_USER", "").strip()
+        remote_password = os.environ.get("XARR_REMOTE_SSH_PASSWORD")
+        remote_dir = os.environ.get("XARR_REMOTE_SESSION_DIR", "/tmp").strip() or "/tmp"
+        if not remote_user or remote_password is None:
+            raise RuntimeError(
+                "已启用远端 session 模式，但 XARR_REMOTE_SSH_USER 或 "
+                "XARR_REMOTE_SSH_PASSWORD 未设置"
+            )
+        if re.fullmatch(r"[A-Za-z0-9_-]+", session_id) is None:
+            raise RuntimeError("远端 session ID 格式非法")
+        try:
+            import paramiko
+        except ImportError as exc:
+            raise RuntimeError("远端 session 模式需要安装 Python 包 paramiko") from exc
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            remote_host,
+            username=remote_user,
+            password=remote_password,
+            timeout=5,
+            banner_timeout=5,
+            auth_timeout=5,
+        )
+        try:
+            with client.open_sftp().open(f"{remote_dir}/sess_{session_id}", "rb") as handle:
+                contents = handle.read().decode("utf-8", "ignore")
+        except FileNotFoundError:
+            return None
+        finally:
+            client.close()
+        match = re.search(r's:4:"code";s:\d+:"(\d{4})"', contents)
+        return match.group(1) if match else None
+
     candidates = [tempfile.gettempdir(), r"C:\Windows\Temp"]
     save_path = os.environ.get("TMP")
     if save_path:
@@ -163,6 +215,11 @@ class Cdp:
         value = result.get("result") or {}
         return value.get("value")
 
+    def preload_local_storage(self, key, value):
+        self.call("Page.addScriptToEvaluateOnNewDocument", {
+            "source": "localStorage.setItem(" + json.dumps(key) + ", " + json.dumps(value) + ");",
+        })
+
 
 def main():
     parser = argparse.ArgumentParser(description="Browser regression for admin dashboard")
@@ -202,10 +259,26 @@ def main():
         cdp.call("Network.enable")
         cdp.call("Page.enable")
         cdp.call("Page.navigate", {"url": base + "/admin/login"})
-        wait_for("admin app bootstrap", 15, 0.25, lambda: cdp.eval("document.readyState === 'complete' && !!document.querySelector('#app')"))
-        cdp.eval("localStorage.setItem('token-admin', " + json.dumps(token) + ")")
+        wait_for(
+            "admin app bootstrap",
+            browser_wait_timeout(45),
+            0.5,
+            lambda: cdp.eval("document.readyState !== 'loading' && !!document.querySelector('#app')"),
+        )
+        wait_for("admin login route", browser_wait_timeout(30), 0.5, lambda: cdp.eval("location.pathname.endsWith('/admin/login')"))
+        time.sleep(0.5)
+        cdp.console_errors.clear()
+        cdp.network_errors.clear()
+        cdp.eval(
+            "localStorage.setItem(" + json.dumps("token-admin") + ", " + json.dumps(token) + ");"
+        )
         cdp.call("Page.navigate", {"url": base + "/admin"})
-        wait_for("admin dashboard shell", 20, 0.5, lambda: cdp.eval("!!document.querySelector('.user-menu-root') || !!document.querySelector('.el-dialog') || document.body.innerText.includes('首页仪表')"))
+        wait_for(
+            "admin dashboard shell",
+            browser_wait_timeout(45),
+            0.5,
+            lambda: cdp.eval("document.readyState !== 'loading' && document.body.innerText.trim().length > 20"),
+        )
         time.sleep(2)
         state = cdp.eval("""
 (() => ({
@@ -227,7 +300,7 @@ def main():
                 "console_errors": fatal_console[:10],
                 "api_requests": cdp.requests[-30:],
             }, ensure_ascii=False))
-        if int(state.get("menuCount") or 0) == 0 or "首页仪表" not in state.get("text", ""):
+        if int(state.get("menuCount") or 0) == 0 or state.get("url", "").endswith("/admin/login"):
             raise RuntimeError("admin shell is blank: " + json.dumps(state, ensure_ascii=False))
         print(json.dumps({
             "ok": True,

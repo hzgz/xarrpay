@@ -8,10 +8,16 @@ use PDO;
 use XArrPay\Http\Request;
 use XArrPay\Support\Database;
 use XArrPay\Support\EpaySigner;
+use XArrPay\Support\OrderSettlementService;
 use XArrPay\Support\Response;
 
 final class EpayController
 {
+    public function unsupported(Request $request, string $protocol): never
+    {
+        Response::error('当前版本未配置该扩展支付协议: ' . $protocol, 501, 501);
+    }
+
     public function submit(Request $request): never
     {
         $params = $request->all();
@@ -53,18 +59,19 @@ final class EpayController
 
         $amount = (int) round(((float) ($params['money'] ?? 0)) * 100);
         $db = Database::connection();
-        // The live schema uses status=2 for a paid order. This is verified from
-        // the production order rows before implementing the compatibility path.
-        $query = $db->prepare('UPDATE `order` SET status = 2, trade_amount = :amount, actual_amount = :actual, pay_time = :pay_time, updated_at = :updated_at WHERE uid = :uid AND (order_id = :order_id OR out_order_id = :out_order_id)');
-        $query->execute([
-            ':amount' => $amount,
-            ':actual' => (string) ($params['money'] ?? ''),
-            ':pay_time' => time(),
-            ':updated_at' => time(),
-            ':uid' => (int) $merchant['id'],
-            ':order_id' => (string) ($params['out_trade_no'] ?? ''),
-            ':out_order_id' => (string) ($params['out_trade_no'] ?? ''),
-        ]);
+        try {
+            (new OrderSettlementService())->settle(
+                $db,
+                $merchant,
+                (string) ($params['out_trade_no'] ?? ''),
+                $amount,
+                (string) ($params['money'] ?? ''),
+                (string) ($params['trade_no'] ?? ''),
+                (string) ($params['buyer'] ?? '')
+            );
+        } catch (\Throwable $exception) {
+            Response::json(['code' => 0, 'message' => $exception->getMessage()], 400);
+        }
 
         echo 'success';
         exit;

@@ -103,7 +103,53 @@ def wait_for(label, timeout, interval, fn):
     raise RuntimeError(f"Timed out waiting for {label}: {last}")
 
 
+def browser_wait_timeout(default):
+    value = os.environ.get("XARR_BROWSER_WAIT_SECONDS", "").strip()
+    if not value:
+        return default
+    try:
+        return max(default, int(value))
+    except ValueError:
+        return default
+
+
 def read_session_code(session_id):
+    remote_host = os.environ.get("XARR_REMOTE_SSH_HOST", "").strip()
+    if remote_host:
+        remote_user = os.environ.get("XARR_REMOTE_SSH_USER", "").strip()
+        remote_password = os.environ.get("XARR_REMOTE_SSH_PASSWORD")
+        remote_dir = os.environ.get("XARR_REMOTE_SESSION_DIR", "/tmp").strip() or "/tmp"
+        if not remote_user or remote_password is None:
+            raise RuntimeError(
+                "已启用远端 session 模式，但 XARR_REMOTE_SSH_USER 或 "
+                "XARR_REMOTE_SSH_PASSWORD 未设置"
+            )
+        if re.fullmatch(r"[A-Za-z0-9_-]+", session_id) is None:
+            raise RuntimeError("远端 session ID 格式非法")
+        try:
+            import paramiko
+        except ImportError as exc:
+            raise RuntimeError("远端 session 模式需要安装 Python 包 paramiko") from exc
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            remote_host,
+            username=remote_user,
+            password=remote_password,
+            timeout=5,
+            banner_timeout=5,
+            auth_timeout=5,
+        )
+        try:
+            with client.open_sftp().open(f"{remote_dir}/sess_{session_id}", "rb") as handle:
+                contents = handle.read().decode("utf-8", "ignore")
+        except FileNotFoundError:
+            return None
+        finally:
+            client.close()
+        match = re.search(r's:4:"code";s:\d+:"(\d{4})"', contents)
+        return match.group(1) if match else None
+
     candidates = [tempfile.gettempdir(), r"C:\Windows\Temp"]
     for directory in candidates:
         path = os.path.join(directory, "sess_" + session_id)
@@ -202,7 +248,16 @@ def main():
         cdp.call("Network.enable")
         cdp.call("Page.enable")
         cdp.call("Page.navigate", {"url": base + "/login"})
-        wait_for("login form", 15, 0.25, lambda: cdp.eval("!!document.querySelector('input[placeholder=\"用户名/邮件\"]') && !!document.querySelector('input[placeholder=\"请输入验证码\"]')"))
+        wait_for(
+            "login form",
+            browser_wait_timeout(45),
+            0.5,
+            lambda: cdp.eval(
+                "document.readyState !== 'loading' && "
+                "!!document.querySelector('input[placeholder=\"用户名/邮件\"]') && "
+                "!!document.querySelector('input[placeholder=\"请输入验证码\"]')"
+            ),
+        )
 
         session_id = wait_for("xarr_php cookie", 10, 0.25, lambda: next((c["value"] for c in cdp.call("Network.getAllCookies").get("cookies", []) if c.get("name") == "xarr_php"), None))
         captcha_code = wait_for("captcha session code", 10, 0.25, lambda: read_session_code(session_id))
@@ -218,6 +273,8 @@ def main():
 
         cdp.eval("""
 (() => {
+  const agreement = document.querySelector('.agree-ys');
+  if (agreement) agreement.click();
   const checkbox = document.querySelector('input[type="checkbox"]');
   if (checkbox && !checkbox.checked) {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'checked').set;
@@ -225,8 +282,6 @@ def main():
     checkbox.dispatchEvent(new Event('change', {bubbles: true}));
     checkbox.dispatchEvent(new Event('input', {bubbles: true}));
   }
-  const agreement = document.querySelector('.agree-ys');
-  if (agreement && checkbox && !checkbox.checked) agreement.click();
   const button = Array.from(document.querySelectorAll('button')).find(el => el.textContent.trim() === '登录');
   if (!button) throw new Error('login button not found');
   button.click();
@@ -234,14 +289,15 @@ def main():
 })()
 """)
 
-        for _ in range(20):
-            if cdp.eval("localStorage.getItem('token') || ''"):
+        for _ in range(browser_wait_timeout(30) * 2):
+            token_value = cdp.eval("localStorage.getItem('token') || ''")
+            if token_value and not cdp.eval("location.pathname.endsWith('/login')"):
                 break
             click_text_button(cdp, "同意并继续")
             time.sleep(0.25)
 
         try:
-            token = wait_for("merchant token", 15, 0.5, lambda: cdp.eval("localStorage.getItem('token') || ''"))
+            token = wait_for("merchant token", browser_wait_timeout(30), 0.5, lambda: cdp.eval("localStorage.getItem('token') || ''"))
         except Exception as exc:
             raise RuntimeError(str(exc) + " | state=" + json.dumps(diagnostic_state(cdp), ensure_ascii=False))
         url = cdp.eval("location.href")

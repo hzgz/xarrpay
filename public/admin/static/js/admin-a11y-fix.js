@@ -139,11 +139,38 @@
     setTimeout(function () {
       scheduled = false;
       normalize(document);
+      addNotifyQueueLink();
     }, 0);
+  }
+
+  function addNotifyQueueLink() {
+    var menu = document.querySelector(".user-menus");
+    if (!menu || menu.querySelector("[data-xarr-notify-queue]")) return;
+
+    var link = document.createElement("a");
+    link.href = "/admin/notify-queue";
+    link.setAttribute("data-xarr-notify-queue", "true");
+    link.setAttribute("aria-label", "通知队列");
+    link.textContent = "通知队列";
+    link.style.cssText = [
+      "display:block",
+      "margin:8px 12px 14px",
+      "padding:10px 12px",
+      "border:1px solid #d9e2f2",
+      "border-radius:6px",
+      "background:#f7faff",
+      "color:#1677ff",
+      "font-size:13px",
+      "line-height:20px",
+      "text-align:center",
+      "text-decoration:none"
+    ].join(";");
+    menu.appendChild(link);
   }
 
   function start() {
     normalize(document);
+    addNotifyQueueLink();
     if (!document.documentElement || !window.MutationObserver) return;
 
     var observer = new MutationObserver(schedule);
@@ -155,4 +182,32 @@
   } else {
     start();
   }
+
+  function errorText(value) {
+    if (!value) return "";
+    if (typeof value === "string") return value;
+    if (value.response && value.response.data) return errorText(value.response.data);
+    return value.message ? String(value.message) : "";
+  }
+
+  function showRuntimeError(value) {
+    var message = errorText(value) || "请求失败，请检查后端返回";
+    var node = document.createElement("div");
+    node.textContent = message;
+    node.style.cssText = "position:fixed;top:20px;right:20px;z-index:2147483647;max-width:420px;padding:12px 16px;border:1px solid #fbc4ab;border-radius:4px;background:#fef0f0;color:#f56c6c;font:14px/1.5 sans-serif;box-shadow:0 2px 12px rgba(0,0,0,.12)";
+    document.body.appendChild(node);
+    window.setTimeout(function () { node.remove(); }, 4500);
+  }
+
+  window.addEventListener("unhandledrejection", function (event) {
+    var message = errorText(event.reason);
+    if (/^Navigation cancelled from /.test(message)) {
+      event.preventDefault();
+      return;
+    }
+    if (event.reason && event.reason.response && Number(event.reason.response.status) >= 400) {
+      event.preventDefault();
+      showRuntimeError(event.reason);
+    }
+  });
 })();

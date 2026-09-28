@@ -21,6 +21,19 @@ final class Request
         return $this->all()[$key] ?? $default;
     }
 
+    /** @return array<string, mixed> */
+    public function files(): array
+    {
+        return is_array($_FILES ?? null) ? $_FILES : [];
+    }
+
+    /** @return array<string, mixed>|null */
+    public function file(string $key): ?array
+    {
+        $file = $this->files()[$key] ?? null;
+        return is_array($file) ? $file : null;
+    }
+
     public function method(): string
     {
         return strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');

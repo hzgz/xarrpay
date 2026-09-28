@@ -7,8 +7,8 @@ namespace XArrPay\Support;
 final class Captcha
 {
     private const SESSION_KEY = 'xarr_numeric_captcha';
-    private const WIDTH = 360;
-    private const HEIGHT = 144;
+    private const WIDTH = 220;
+    private const HEIGHT = 88;
 
     public static function fontPath(): string
     {
@@ -67,10 +67,10 @@ final class Captcha
         }
 
         $text = imagecolorallocate($image, 25, 43, 67);
-        $fontSize = 74;
+        $fontSize = 46;
         for ($index = 0; $index < strlen($code); $index++) {
-            $x = 32 + $index * 82;
-            $y = random_int(98, 112);
+            $x = 17 + $index * 50;
+            $y = random_int(61, 70);
             imagettftext($image, $fontSize, random_int(-4, 4), $x, $y, $text, self::fontPath(), $code[$index]);
         }
 

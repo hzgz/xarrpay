@@ -1,0 +1,25 @@
+{
+  "id": "yun_wechat_gj_xd",
+  "name": "yun_wechat_gj_xd",
+  "type": "pay",
+  "title": "微信云端-电脑管家-XD",
+  "author": "XD",
+  "description": "通过电脑管家账号创建微信收款单或小账本二维码。",
+  "version": "1.2.2",
+  "capabilities": ["create", "qrcode", "login_qrcode", "login_qrcode_check", "cron", "heartbeat"],
+  "pay_types": ["wxpay"],
+  "plugin_options": {"need_check_online": 1, "use_qrcode_login": 1, "use_add_amount": 1},
+  "channels": {
+    "wxpay": [{
+      "label": "微信云端-电脑管家-XD",
+      "value": "yun_wechat_gj_xd",
+      "report": 1,
+      "options": {"need_check_online": 1, "use_qrcode_login": 1, "use_add_amount": 1}
+    }]
+  },
+  "form_entry": "form.php",
+  "account_entry": "account.php",
+  "enabled": true,
+  "running": true,
+  "adapter_entry": "adapter.php"
+}

@@ -6,6 +6,9 @@ namespace XArrPay\Http\Controllers;
 
 use XArrPay\Http\Request;
 use XArrPay\Support\Database;
+use XArrPay\Support\PaymentAccountAllocator;
+use XArrPay\Support\PaymentPluginCatalog;
+use XArrPay\Support\PaymentPluginRegistry;
 use XArrPay\Support\Response;
 
 final class PayController
@@ -35,9 +38,28 @@ final class PayController
             Response::error('支付方式不可用');
         }
 
-        $update = Database::connection()->prepare('UPDATE `order` SET pay_type = :pay_type, updated_at = :updated_at WHERE order_id = :order_id AND status = 1');
-        $update->execute([':pay_type' => $payType, ':updated_at' => time(), ':order_id' => (string) $order['order_id']]);
+        $db = Database::connection();
+        try {
+            $db->beginTransaction();
+            $allocation = (new PaymentAccountAllocator())->allocate($db, $order, $payType);
+            $update = $db->prepare('UPDATE `order` SET pay_type = :pay_type, channel_code = :channel_code, account_id = :account_id, updated_at = :updated_at WHERE order_id = :order_id AND status = 1');
+            $update->execute([
+                ':pay_type' => $payType,
+                ':channel_code' => (string) ($allocation['channel']['code'] ?? ''),
+                ':account_id' => (int) ($allocation['account']['id'] ?? 0),
+                ':updated_at' => time(),
+                ':order_id' => (string) $order['order_id'],
+            ]);
+            $db->commit();
+        } catch (\Throwable $exception) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            Response::error($exception->getMessage(), 409, 409);
+        }
         $order['pay_type'] = $payType;
+        $order['channel_code'] = (string) ($allocation['channel']['code'] ?? '');
+        $order['account_id'] = (int) ($allocation['account']['id'] ?? 0);
         Response::success($this->orderData($order), '支付方式已选择');
     }
 
@@ -49,24 +71,75 @@ final class PayController
 
     public function config(): never
     {
-        $rows = Database::connection()->query('SELECT `key`, value FROM `options` ORDER BY `key`')->fetchAll();
+        $db = Database::connection();
+        PaymentPluginCatalog::syncAllChannels($db);
+        $rows = $db->query('SELECT `key`, value FROM `options` ORDER BY `key`')->fetchAll();
         $config = [];
         foreach ($rows as $row) {
             $value = $row['value'] ?? '';
             $decoded = is_string($value) ? json_decode($value, true) : null;
             $config[(string) $row['key']] = json_last_error() === JSON_ERROR_NONE ? $decoded : $value;
         }
-        $config['web_title'] ??= 'XArrPay 支付系统';
-        $config['web_index_title'] ??= $config['web_title'];
-        $config['web_logo'] ??= '/admin/static/images/logo.png';
+        $config['web_title'] ??= '';
+        $config['web_index_title'] ??= '';
+        $config['web_logo'] ??= '';
         $config['web_service_qq'] ??= '';
+        $config['pay_type'] = [];
+        foreach ($db->query('SELECT * FROM pay_type WHERE status = 1 ORDER BY id')->fetchAll() as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $value = trim((string) ($row['value'] ?? $row['code'] ?? ''));
+            if ($value === '') {
+                continue;
+            }
+            $config['pay_type'][] = [
+                'value' => $value,
+                'label' => (string) ($row['label'] ?? $row['name'] ?? $value),
+                'name' => (string) ($row['name'] ?? $value),
+                'logo' => (string) ($row['logo'] ?? ''),
+            ];
+        }
+        $config['channels'] = [];
+        $channels = $db->query(
+            'SELECT c.* FROM pay_channel c '
+            . 'INNER JOIN pay_type t ON t.value = c.type AND t.status = 1 '
+            . 'WHERE c.status = 1 ORDER BY c.id'
+        )->fetchAll();
+        foreach ($channels as $channel) {
+            if (!is_array($channel)) {
+                continue;
+            }
+            $pluginName = trim((string) ($channel['plugin_name'] ?? ''));
+            $payType = trim((string) ($channel['type'] ?? ''));
+            $code = trim((string) ($channel['code'] ?? ''));
+            if ($pluginName === '' || $payType === '' || $code === ''
+                || !PaymentPluginRegistry::usableForPayType($pluginName, $payType)) {
+                continue;
+            }
+            $config['channels'][] = [
+                'code' => $code,
+                'name' => (string) ($channel['name'] ?? $code),
+                'type' => $payType,
+                'plugin_name' => $pluginName,
+            ] + PaymentPluginCatalog::channelMeta($pluginName, $code, $payType);
+        }
         Response::success($config);
     }
 
     public function types(Request $request): never
     {
-        $order = $this->order($request->input('order_id'));
-        $rows = Database::connection()->query('SELECT * FROM `pay_type` WHERE status = 1 ORDER BY id')->fetchAll();
+        $orderId = trim((string) $request->input('order_id', ''));
+        $uid = 0;
+        if ($orderId !== '') {
+            $order = $this->order($orderId);
+            $uid = (int) ($order['uid'] ?? 0);
+        } else {
+            $uid = $this->merchantUid($request);
+        }
+        $query = Database::connection()->prepare('SELECT DISTINCT t.* FROM `pay_type` t INNER JOIN `pay_account` a ON a.pay_type = t.value AND a.status = 1 INNER JOIN `pay_channel` c ON c.code = a.channel_code AND c.status = 1 WHERE t.status = 1 AND (a.uid = :uid OR a.uid = 0) ORDER BY t.id');
+        $query->execute([':uid' => $uid]);
+        $rows = $query->fetchAll();
         $items = [];
         foreach ($rows as $row) {
             $value = (string) ($row['value'] ?? $row['code'] ?? $row['name'] ?? '');
@@ -79,9 +152,6 @@ final class PayController
                 'logo' => (string) ($row['logo'] ?? $row['icon'] ?? '/admin/static/images/pay/' . $value . '.png'),
             ];
         }
-        if ($items === []) {
-            $items[] = ['value' => (string) ($order['pay_type'] ?: 'alipay'), 'label' => '支付宝', 'logo' => '/admin/static/images/pay/alipay.png'];
-        }
         Response::success($items);
     }
 
@@ -92,36 +162,60 @@ final class PayController
             Response::error('订单已不可支付');
         }
 
-        $account = $this->account((string) $order['pay_type']);
-        if ($account === null) {
-            Response::error('当前支付方式暂无收款账号');
-        }
-
-        $value = (string) ($account['account'] ?? $account['value'] ?? $account['url'] ?? '');
-        $type = (string) ($account['account_type'] ?? $account['type'] ?? '');
-        $isText = $value !== '' && preg_match('#^https?://#i', $value) !== 1 && str_starts_with($value, 'T');
-        $qrcodeData = (string) ($account['qrcode_data'] ?? '');
-        if ($qrcodeData === '' && $value !== '') {
-            $qrcodeData = 'data:image/svg+xml,' . rawurlencode('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><rect width="300" height="300" fill="#f5f7fa"/><text x="150" y="140" text-anchor="middle" fill="#606266" font-size="22">本地演示二维码</text><text x="150" y="175" text-anchor="middle" fill="#909399" font-size="14">' . htmlspecialchars($value, ENT_QUOTES, 'UTF-8') . '</text></svg>');
+        $db = Database::connection();
+        try {
+            $db->beginTransaction();
+            $allocation = (new PaymentAccountAllocator())->allocate($db, $order, (string) ($order['pay_type'] ?? ''));
+            $update = $db->prepare('UPDATE `order` SET pay_type = :pay_type, channel_code = :channel_code, account_id = :account_id, updated_at = :updated_at WHERE id = :id AND status = 1');
+            $update->execute([
+                ':pay_type' => (string) ($order['pay_type'] ?? $allocation['account']['pay_type'] ?? ''),
+                ':channel_code' => (string) ($allocation['channel']['code'] ?? ''),
+                ':account_id' => (int) ($allocation['account']['id'] ?? 0),
+                ':updated_at' => time(),
+                ':id' => (int) $order['id'],
+            ]);
+            $order['pay_type'] = trim((string) ($order['pay_type'] ?? '')) !== ''
+                ? (string) $order['pay_type']
+                : (string) ($allocation['account']['pay_type'] ?? '');
+            $order['channel_code'] = (string) ($allocation['channel']['code'] ?? '');
+            $order['account_id'] = (int) ($allocation['account']['id'] ?? 0);
+            $payment = $allocation['plugin']->create($order, $allocation['channel'], $allocation['account']);
+            $persist = $db->prepare('UPDATE `order` SET out_pay_order_id = :out_pay_order_id, actual_account = :actual_account, updated_at = :updated_at WHERE id = :id AND status = 1');
+            $persist->execute([
+                ':out_pay_order_id' => (string) ($payment['out_pay_order_id'] ?? ''),
+                ':actual_account' => (string) ($payment['actual_account'] ?? ''),
+                ':updated_at' => time(),
+                ':id' => (int) $order['id'],
+            ]);
+            $db->commit();
+        } catch (\Throwable $exception) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            Response::error($exception->getMessage(), 409, 409);
         }
         Response::success([
-            'type' => $isText ? 'text' : 'qrcode',
-            'qrcode_data' => $qrcodeData,
-            'qrcode' => $value,
-            'uri' => (string) ($account['uri'] ?? ''),
-            'scheme' => (string) ($account['scheme'] ?? ''),
-            'content' => $value,
-            'content_copy' => $isText,
+            'type' => (string) ($payment['type'] ?? 'qrcode'),
+            'qrcode_data' => (string) ($payment['qrcode_data'] ?? ''),
+            'qrcode' => (string) ($payment['qrcode'] ?? ''),
+            'uri' => (string) ($allocation['account']['uri'] ?? ''),
+            'scheme' => (string) ($allocation['account']['scheme'] ?? ''),
+            'content' => (string) ($payment['content'] ?? ''),
+            'content_copy' => (bool) ($payment['content_copy'] ?? false),
             'actual_amount' => number_format(((int) $order['trade_amount']) / 100, 2, '.', ''),
-            'actual_account' => $value,
-            'actual_account_type' => $type,
+            'actual_account' => (string) ($payment['actual_account'] ?? ''),
+            'actual_account_type' => (string) ($payment['actual_account_type'] ?? ''),
         ]);
     }
 
     public function cashierParse(Request $request): never
     {
         $merchant = $this->merchantByKey($request->input('key'));
-        Response::success(['merchant_name' => (string) ($merchant['merchant_name'] ?? $merchant['name'] ?? 'XArrPay 商户')]);
+        $merchantName = trim((string) ($merchant['merchant_name'] ?? $merchant['name'] ?? ''));
+        if ($merchantName === '') {
+            Response::error('收银台商户名称未配置', 422, 422);
+        }
+        Response::success(['merchant_name' => $merchantName]);
     }
 
     public function createCashier(Request $request): never
@@ -194,15 +288,6 @@ final class PayController
         return null;
     }
 
-    /** @return array<string, mixed>|null */
-    private function account(string $payType): ?array
-    {
-        $query = Database::connection()->prepare('SELECT * FROM `pay_account` WHERE status = 1 AND pay_type = :pay_type ORDER BY id LIMIT 1');
-        $query->execute([':pay_type' => $payType]);
-        $row = $query->fetch();
-        return is_array($row) ? $row : null;
-    }
-
     /** @return array<string, mixed> */
     private function merchantByKey(mixed $key): array
     {
@@ -217,6 +302,21 @@ final class PayController
             Response::error('收银台不存在或已停用', 404, 404);
         }
         return $merchant;
+    }
+
+    private function merchantUid(Request $request): int
+    {
+        $token = trim((string) $request->header('Authorization'));
+        if ($token === '') {
+            Response::error('未登录', 401, 401);
+        }
+        $query = Database::connection()->prepare('SELECT id FROM `user` WHERE token=:token AND status=1 LIMIT 1');
+        $query->execute([':token' => $token]);
+        $uid = $query->fetchColumn();
+        if ($uid === false) {
+            Response::error('登录已失效', 401, 401);
+        }
+        return (int) $uid;
     }
 
     /** @return array<string, mixed> */

@@ -1,0 +1,30 @@
+{
+  "id": "jk_wechat_app",
+  "name": "jk_wechat_app",
+  "type": "pay",
+  "title": "监控插件 - 微信APP集成版",
+  "author": "Shark sea",
+  "description": "使用微信客户端监控真实支付流水和收款码。",
+  "version": "0.0.2",
+  "capabilities": ["create", "qrcode", "heartbeat", "message_parse"],
+  "pay_types": ["wxpay"],
+  "plugin_options": {"use_add_amount": 1, "use_pay_codes": 1, "bind_client_name": 1},
+  "channels": {
+    "wxpay": [{
+      "label": "软件自挂",
+      "value": "wxpay_app_monitor",
+      "report": 1,
+      "parse_msg": 1,
+      "options": {"use_add_amount": 1, "use_pay_codes": 1, "bind_client_name": 1}
+    }]
+  },
+  "config": [
+    {"title": "定时器（6段格式，重启生效）", "key": "heartbeat_cron", "default": "*/5 * * * * *"},
+    {"title": "心跳超时秒数", "key": "heartbeat_timeout", "default": "300"}
+  ],
+  "form_entry": "form.php",
+  "account_entry": "account.php",
+  "enabled": true,
+  "running": true,
+  "adapter_entry": "adapter.php"
+}

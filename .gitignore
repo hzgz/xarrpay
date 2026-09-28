@@ -7,6 +7,7 @@ logs/
 vendor/
 /var/
 /reverse-work/
+/版本记录1/
 *.log
 *.pid
 *.sqlite
