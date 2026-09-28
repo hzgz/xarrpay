@@ -4,7 +4,9 @@
 runtime/
 storage/
 logs/
-vendor/
+vendor/*
+!vendor/qrcode-detector-decoder/
+!vendor/qrcode-detector-decoder/**
 /var/
 /reverse-work/
 /版本记录1/
